@@ -3,9 +3,9 @@ from pathlib import Path
 
 
 class Database:
-    def __init__(self, path_to_db=Path(Path(r'data\users_settings.sqlite3'))):
+    def __init__(self, path_to_db=Path(Path(r'data/users_settings.sqlite3'))):
         self.path_to_db = path_to_db  # if test.py doesn't work, try this path:
-        # Path(r'C:\Users\Olyx\Desktop\python\projects\tbot\data\users_settings.sqlite3')
+        # Path(r'C:\Users\%username%\Desktop\python\projects\tbot\data\users_settings.sqlite3')
 
     @property
     def connection(self):

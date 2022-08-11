@@ -266,10 +266,7 @@ async def if_is_link(message: types.Message):
                 case 'mp4':
                     await bot.send_video(video=file_id, caption=filename.rsplit('.', 1)[0], chat_id=user_id)
                 case _:
-                    try:
-                        await bot.send_audio(audio=file_id, caption=filename.rsplit('.', 1)[0], chat_id=user_id)
-                    except:
-                        await bot.send_document(document=file_id, caption=filename.rsplit('.', 1)[0], chat_id=user_id)
+                    await bot.send_audio(audio=file_id, caption=filename.rsplit('.', 1)[0], chat_id=user_id)
 
             os.remove(filename)
             os.remove(thumbnail_filename)

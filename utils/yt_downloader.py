@@ -72,7 +72,7 @@ def extract_info(url: str, u_vquality, u_aquality, segmentsToMark, segmentsToDel
                                    if f['vcodec'] != 'none' and f['acodec'] and f['ext'] == 'mp4')
                 case _:
                     qualities = ('4320p', '4320p60', '2160p', '2160p60', '1080p', '1080p60',
-                                 '720p', '720p60', '360p', '240p', '144p')
+                                 '720p', '720p60', '480p', '360p', '240p', '144p')
                     if pos is None:
                         pos = qualities.index(u_vquality)
                     else:
@@ -128,14 +128,17 @@ def extract_info(url: str, u_vquality, u_aquality, segmentsToMark, segmentsToDel
                                                             u_video['ext'],  # ext
                                                             f'{u_video["protocol"]}+{u_audio["protocol"]}',  # protocol
                                                             'mp4')
+    if len(requested_formats) == 2:
+        formats = f'{requested_formats[0]["format_id"]}+{requested_formats[1]["format_id"]}'
+    else:
+        formats = f'{requested_formats["format_id"]}'
     return {
-        'format': f'{u_video["format_id"]}+{u_audio["format_id"]}',
+        'format': formats,
         'ext': ext,
         'requested_formats': [requested_formats],
-        'protocol': f'{u_video["protocol"]}+{u_audio["protocol"]}',
+        'protocol': protocol,
         'nocheckcertificate': True,
         'ignoreerrors': False,
-        'logtostderr': False,
         'quiet': True,
         'no_warnings': True,
 
@@ -155,12 +158,16 @@ def extract_info(url: str, u_vquality, u_aquality, segmentsToMark, segmentsToDel
 
 def download_video(url, id):
     settings = db.select_user(id=id)
+    segmentsToMark = settings[4]
+    segmentsToDelete = settings[5]
     for key, vallue in CATEGORIES.items():
-        segmentsToMark = settings[4].replace(vallue, key).split(', ')
-        segmentsToDelete = settings[5].replace(vallue, key).split(', ')
+        segmentsToMark = segmentsToMark.replace(vallue, key)
+        segmentsToDelete = segmentsToDelete.replace(vallue, key)
+    segmentsToMark = segmentsToMark.split(', ')
+    segmentsToDelete = segmentsToDelete.split(', ')
     segmentsToMark += segmentsToDelete
-    segmentsToMark = set(segmentsToMark)
     segmentsToDelete = ', '.join(segmentsToDelete)
+    segmentsToMark = set(segmentsToMark)
     res = settings[2].split('Quality: ')[-1].replace('"', '')
     audio_q = settings[3].split('Quality: ')[-1].replace('"', '')
     ytdl_opts = extract_info(url, res, audio_q, segmentsToMark, segmentsToDelete)
@@ -191,11 +198,11 @@ def download_video(url, id):
         raise 'FileIsTooLarge'
 
     thumbnail_url = info_dict.get('thumbnails')[-1].get('url')
-    thumbnail_filename = 'C:\\Users\\Olyx\\Desktop\\python\\projects\\tbot\\' + thumbnail_url.split('/')[-2] + '.png'
+    thumbnail_filename = thumbnail_url.split('/')[-2] + '.png'
     with open(thumbnail_filename, 'wb') as file:
         file.write(get(thumbnail_url).content)
     image = Image.open(thumbnail_filename)
-    image.thumbnail((1280, 720))
+    # image.thumbnail((1280, 720))
     image.save(thumbnail_filename)
 
     return filename, thumbnail_filename, ext
