@@ -1,24 +1,26 @@
 # -*- coding:utf-8 -*-
 import os
 import yt_dlp
+from yt_dlp import DownloadError
 from loader import db
 from requests import get
 from PIL import Image
+from cv2 import imread
 
 CATEGORIES = {
     'intro': 'intermission / intro animation',
     'outro': 'endcards / credits',
-    'selfpromo': 'unpaid / self promotion',
+    'selfpromo': 'self-promotion',
     'preview': 'preview / recap',
     'interaction': 'interaction reminder',
-    'music_offtopic': 'mussic off-topic'
+    'music_offtopic': 'music off-topic'
 }
 
 # Suppress noise about console usage from errors
 yt_dlp.utils.bug_reports_message = lambda: ''
 
 
-def extract_info(url: str, u_vquality, u_aquality, segmentsToMark, segmentsToDelete):
+def extract_info(url: str, u_vquality, u_aquality, segmentsToMark, segmentsToDelete, turn_off_sponsorblock):
     with yt_dlp.YoutubeDL() as ydl:
         info = ydl.extract_info(url, download=False)
 
@@ -85,12 +87,18 @@ def extract_info(url: str, u_vquality, u_aquality, segmentsToMark, segmentsToDel
                         for i in qualities[pos:]:
                             for v_format in formats:
                                 if i == v_format['format_note']:
-                                    u_video = next(f for f in formats
-                                                   if f['format_note'] == i and f['ext'] == 'mp4')
-                                    found = True
-                                    break
-                                if found:
-                                    break
+                                    try:
+                                        u_video = next(f for f in formats
+                                                       if f['format_note'] == i and f['ext'] == 'mp4')
+                                        found = True
+                                        break
+                                    except StopIteration:
+                                        u_video = next(f for f in formats
+                                                       if f['format_note'] == i)
+                                        found = True
+                                        break
+                            if found:
+                                break
             if u_vquality != 'no video':
                 audio_ext = {'mp4': 'm4a', 'webm': 'webm'}[u_video['ext']]
             else:
@@ -132,29 +140,47 @@ def extract_info(url: str, u_vquality, u_aquality, segmentsToMark, segmentsToDel
         formats = f'{requested_formats[0]["format_id"]}+{requested_formats[1]["format_id"]}'
     else:
         formats = f'{requested_formats["format_id"]}'
-    return {
-        'format': formats,
-        'ext': ext,
-        'requested_formats': [requested_formats],
-        'protocol': protocol,
-        'nocheckcertificate': True,
-        'ignoreerrors': False,
-        'quiet': True,
-        'no_warnings': True,
 
-        'key': {'EmbedThumbnail': True},
-        'postprocessors': [
-            {'key': 'SponsorBlock',
-             'categories':
-                 segmentsToMark
-             },
-            {'key': 'ModifyChapters', 'remove_sponsor_segments':
-                {segmentsToDelete}},
+    if not turn_off_sponsorblock:
+        return {
+            'format': formats,
+            'ext': ext,
+            'requested_formats': [requested_formats],
+            'protocol': protocol,
+            'nocheckcertificate': True,
+            'ignoreerrors': False,
+            'quiet': True,
+            'no_warnings': True,
+
+            'key': {'EmbedThumbnail': True},
+            'postprocessors': [
+                {'key': 'SponsorBlock',
+                 'categories':
+                     segmentsToMark
+                 },
+                {'key': 'ModifyChapters', 'remove_sponsor_segments':
+                    {segmentsToDelete}},
+                {'key': 'FFmpegMetadata', 'add_chapters': True},
+                {'key': 'FFmpegVideoConvertor', 'preferedformat': preferedformat}
+            ]
+        }
+    else:
+        return {
+            'format': formats,
+            'ext': ext,
+            'requested_formats': [requested_formats],
+            'protocol': protocol,
+            'nocheckcertificate': True,
+            'ignoreerrors': False,
+            'quiet': True,
+            'no_warnings': True,
+
+            'key': {'EmbedThumbnail': True},
+            'postprocessors': [
             {'key': 'FFmpegMetadata', 'add_chapters': True},
             {'key': 'FFmpegVideoConvertor', 'preferedformat': preferedformat}
-        ]
-    }
-
+            ]
+        }
 
 def download_video(url, id):
     settings = db.select_user(id=id)
@@ -170,12 +196,94 @@ def download_video(url, id):
     segmentsToMark = set(segmentsToMark)
     res = settings[2].split('Quality: ')[-1].replace('"', '')
     audio_q = settings[3].split('Quality: ')[-1].replace('"', '')
-    ytdl_opts = extract_info(url, res, audio_q, segmentsToMark, segmentsToDelete)
-
-    with yt_dlp.YoutubeDL(ytdl_opts) as ydl:
-        info_dict = ydl.extract_info(url, download=True)
+    
+    turn_off_sponsorblock = False
+    ytdl_opts = extract_info(url, res, audio_q, segmentsToMark, segmentsToDelete, turn_off_sponsorblock)
+    for i in range(1):
+        with yt_dlp.YoutubeDL(ytdl_opts) as ydl:
+            try:
+                info_dict = ydl.extract_info(url, download=True)
+                break
+            except DownloadError:
+                if i == 1:
+                    ytdl_opts = extract_info(url, res, audio_q, segmentsToMark, segmentsToDelete, turn_off_sponsorblock)
+                    turn_off_sponsorblock = True
 
     ext = info_dict.get('requested_downloads')[0].get('_filename').split('.')[-1]
+
+    chapters_info = ''
+    if res != 'no video':
+        invalid_positions = []
+        chapters_endings = []
+        chapters = info_dict.get('requested_downloads')[0].get('sponsorblock_chapters')
+
+        chapters2 = info_dict.get('chapters')
+        if chapters2 != None:
+            chapters += chapters2
+
+        for num, chapter in enumerate(info_dict.get('requested_downloads')[0].get('sponsorblock_chapters')):
+            if 'category' in chapter:
+                title = chapter.get('category')
+            else:
+                title = chapter.get('title')
+            start_time = chapter.get('start_time')
+            end_time = chapter.get('end_time')
+            chapters_endings.append((title, end_time, num))
+
+            if title in segmentsToDelete:
+                invalid_positions.append((start_time, end_time))
+
+        dif = 0
+        chapters_info = []
+        invalid = False
+
+        chapters_endings_sorted = sorted(chapters_endings, key=lambda x: x[1])
+            
+        # (*info_dict.get('requested_downloads')[0].get('sponsorblock_chapters'))
+        for num, chapter in enumerate(chapters):
+            if 'category' in chapter:
+                title = chapter.get('category')
+            else:
+                title = chapter.get('title')
+            start_time = chapter.get('start_time')
+            end_time = chapter.get('end_time')
+
+            if title in segmentsToDelete:
+                dif += end_time - start_time
+                continue
+
+            if chapters_endings_sorted[num][1] > end_time and chapters_endings[num][0] in segmentsToDelete:
+                dif += chapters_endings_sorted[num][1] - end_time
+
+            for position in invalid_positions:
+                if position[0] <= start_time <= position[1]:
+                    if end_time <= position[1]:
+                        invalid = True
+                        break
+                    start_time = position[0]
+
+            if invalid:
+                invalid = False
+                continue
+
+            for key, vallue in CATEGORIES.items():
+                title = title.replace(key, vallue)
+
+            start_time -= dif
+            minutes = int(start_time / 60)
+            seconds = int(start_time % 60)
+            if seconds < 10:
+                seconds = f'0{seconds}'
+            start_time = f'{minutes}:{seconds}'
+
+            end_time -= dif
+            minutes = int(end_time / 60)
+            seconds = int(end_time % 60)
+            if seconds < 10:
+                seconds = f'0{seconds}'
+            end_time = f'{minutes}:{seconds}'
+
+            chapters_info.append((title, start_time, end_time))
 
     try:
         filename = f"{info_dict.get('requested_downloads')[0].get('_filename').rsplit(' ', 1)[0]}.{ext}"
@@ -186,23 +294,37 @@ def download_video(url, id):
             filename = f"{info_dict.get('requested_downloads')[0].get('_filename').rsplit(' ', 1)[0]}.{ext}"
             os.rename(f"{info_dict.get('requested_downloads')[0].get('_filename').rsplit('.', 1)[0]}.{ext}", filename)
         except FileNotFoundError:
-            ext = 'mp4'
-            filename = f"{info_dict.get('requested_downloads')[0].get('_filename').rsplit(' ', 1)[0]}.{ext}"
-            os.rename(f"{info_dict.get('requested_downloads')[0].get('_filename').rsplit('.', 1)[0]}.{ext}", filename)
+            try:
+                ext = 'mp4'
+                filename = f"{info_dict.get('requested_downloads')[0].get('_filename').rsplit(' ', 1)[0]}.{ext}"
+                os.rename(f"{info_dict.get('requested_downloads')[0].get('_filename').rsplit('.', 1)[0]}.{ext}",
+                          filename)
+            except FileExistsError:
+                pass
         except FileExistsError:
             pass
     except FileExistsError:
         pass
 
     if os.stat(filename).st_size > 2147483648:
-        raise 'FileIsTooLarge'
-
+        raise Exception('FileIsTooLarge')
+    
     thumbnail_url = info_dict.get('thumbnails')[-1].get('url')
     thumbnail_filename = thumbnail_url.split('/')[-2] + '.png'
+
     with open(thumbnail_filename, 'wb') as file:
         file.write(get(thumbnail_url).content)
+
+    img = imread(thumbnail_filename)
+    if img.shape[0] == 90 and img.shape[1] == 120:
+        os.remove(thumbnail_filename)
+        thumbnail_url = info_dict.get('thumbnails')[-6].get('url')
+        thumbnail_filename = thumbnail_url.split('/')[-2] + '.png'
+        with open(thumbnail_filename, 'wb') as file:
+            file.write(get(thumbnail_url).content)
+
     image = Image.open(thumbnail_filename)
-    # image.thumbnail((1280, 720))
+    # image.thumbnail(1280, 720)
     image.save(thumbnail_filename)
 
-    return filename, thumbnail_filename, ext
+    return filename, thumbnail_filename, ext, chapters_info, turn_off_sponsorblock

@@ -5,7 +5,7 @@ env.read_env()
 
 BOT_TOKEN = env.str("BOT_TOKEN")
 ADMINS = env.list("ADMINS")
-IP = env.str("ip")
-API_ID = env.int("API_ID")
+IP = env.str("IP")  # ip хоста
+API_ID = env.str("API_ID") 
 API_HASH = env.str("API_HASH")
-CHAT_ID = env.int("CHAT_ID")  # Чат, где будут храниться видео
+CHAT_ID = env.str("CHAT_ID")

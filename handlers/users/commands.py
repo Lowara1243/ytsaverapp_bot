@@ -43,7 +43,7 @@ async def run_blocking_io(func, url, id):
 async def go_back(message: types.Message, state: FSMContext):
     await in_database(message.from_user.id, message.from_user.username)
     await state.finish()
-    await message.answer('Wellcome back!', reply_markup=menu)
+    await message.answer('Welcome back!', reply_markup=menu)
 
 
 @dp.message_handler(Text(equals='❓ FAQ'))  # меню настроек (почти готово)
@@ -61,7 +61,20 @@ async def show_FAQ(message: types.Message):
                          '1) You will not download anything besides your videos file\n'
                          '2) You\'ll gain an ability to watch videos offline whenever and wherever you want\n'
                          '3) Your traffic usage will be reduced because you will not download sponsor segments\n'
-                         'And etc')
+                         'Etc\n\n'
+                         '>How can I start downloading videos?\n'
+                         'To start downloading, you just need to send a video link to a bot\n\n'
+                         '>Does this bot support downloading/recording streams?\n'
+                         'Currently – no\n\n'
+                         '>Does this bot support playlist downloading?\n'
+                         'Currently – no\n\n'
+                         '>How does "Segments to mark" works?\n'
+                         'It marks video fragments as chapters if they were found in SponsorBlock\'s database '
+                         '(Not visible in the Telegram\'s video player).\n'
+                         'Also, it makes timestamps in description\n\n'
+                         '>How does "Segments to delete" works?\n'
+                         'It cuts off the fragments it finds in SponsorBlock\'s database, so they don\'t download. '
+                         'By doing this, you can reduce your traffic usage.')
 
 
 @dp.message_handler(Text(equals='⚙️ Settings'))  # меню настроек (почти готово)
@@ -223,16 +236,14 @@ async def set_new_codec(message: types.Message):
 async def if_is_link(message: types.Message):
     global queue, running_rn
     await in_database(message.from_user.id, message.from_user.username)
-    regex = re.compile(
-        r'^https?://'  # http:// or https://
-        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # domain...
-        r'localhost|'  # localhost...
-        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
-        r'(?::\d+)?'  # optional port
-        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+    regex = '^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|v\/)?)([\w\-]+)(\S+)?$'
+    regex = re.compile(regex, re.IGNORECASE)
 
     is_url = lambda url: url is not None and regex.search(url)
     if is_url(message.text):
+        if 'list=' in message.text:
+            await message.answer('Sorry, playlists aren\'t supported at the moment')
+            return
         queue.append((message.text, message.from_user.id))
         if running_rn:
             await message.answer(f'Your link was added to a queue\n'
@@ -240,37 +251,52 @@ async def if_is_link(message: types.Message):
             return
         await message.answer('Bot has recieved url...')
         while len(queue) != 0:
-            running_rn = True
-            user_link = queue[0][0]
-            user_id = queue[0][1]
-
             try:
-                result = await run_blocking_io(download_video, user_link, user_id)
-                filename, thumbnail_filename, ext = result
+                running_rn = True
+                user_link = queue[0][0]
+                user_id = queue[0][1]
+
+                try:
+                    result = await run_blocking_io(download_video, user_link, user_id)
+                    filename, thumbnail_filename, ext, chapters_info, sponsorblock_active = result
+                except Exception as e:
+                    logging.exception(e)
+                    await bot.send_message(text='It seems that the link was invalid', chat_id=user_id)
+                    queue.pop(0)
+                    if len(queue) == 0:
+                        running_rn = False
+                        return
+                    continue
+                if sponsorblock_active:
+                    await bot.send_message(text='Bot downloaded video, sending to user...', chat_id=user_id)
+                else:
+                    await bot.send_message(text='Bot downloaded video, but it seems that SponsorBlock\'s sever is down, sending to user...', chat_id=user_id)
+
+                text = ''.join(
+                    [f'{chapter_info[1]} {chapter_info[0]}[start]\n{chapter_info[2]} {chapter_info[0]}[end]\n' for chapter_info in chapters_info])
+
+                match ext:
+                    case 'mp4':
+                        await send_video(filename, thumbnail_filename, text)
+                    case _:
+                        await send_audio(filename, thumbnail_filename)
+
+                file_id = await get_history()
+
+                match ext:
+                    case 'mp4':
+                        await bot.send_video(video=file_id, caption=f'{filename.rsplit(".", 1)[0]}\n\n{text}',
+                                             chat_id=user_id)
+                    case _:
+                        await bot.send_audio(audio=file_id, chat_id=user_id)
+
+                os.remove(filename)
+                os.remove(thumbnail_filename)
+                queue.pop(0)
             except Exception as e:
                 logging.exception(e)
-                await bot.send_message(text='It seems that the link was invalid', chat_id=user_id)
+                await bot.send_message(text='Something went wrong...', chat_id=user_id)
                 queue.pop(0)
-                return
-            await bot.send_message(text='Bot downloaded video, sending to user...', chat_id=user_id)
-
-            match ext:
-                case 'mp4':
-                    await send_video(filename, thumbnail_filename)
-                case _:
-                    await send_audio(filename, thumbnail_filename)
-
-            file_id = await get_history()
-
-            match ext:
-                case 'mp4':
-                    await bot.send_video(video=file_id, caption=filename.rsplit('.', 1)[0], chat_id=user_id)
-                case _:
-                    await bot.send_audio(audio=file_id, caption=filename.rsplit('.', 1)[0], chat_id=user_id)
-
-            os.remove(filename)
-            os.remove(thumbnail_filename)
-            queue.pop(0)
         running_rn = False
     else:
         await message.answer('I don\'t know such a command')
