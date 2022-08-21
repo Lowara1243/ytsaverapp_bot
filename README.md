@@ -29,6 +29,7 @@ Of these, the mandatory:
 - API_HASH
 - API_ID
 - CHAT_ID
+- WORKS_IN_CHATS
 
 CHAT_ID is required only to avoid the telegram's file size limit.
 Also, don't forget to make the bot an administrator in the chat where it will post videos.

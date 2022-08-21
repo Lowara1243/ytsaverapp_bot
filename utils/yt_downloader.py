@@ -182,8 +182,8 @@ def extract_info(url: str, u_vquality, u_aquality, segmentsToMark, segmentsToDel
             ]
         }
 
-def download_video(url, id):
-    settings = db.select_user(id=id)
+def download_video(url, ID):
+    settings = db.select_user(id=ID)
     segmentsToMark = settings[4]
     segmentsToDelete = settings[5]
     for key, vallue in CATEGORIES.items():
@@ -199,15 +199,21 @@ def download_video(url, id):
     
     turn_off_sponsorblock = False
     ytdl_opts = extract_info(url, res, audio_q, segmentsToMark, segmentsToDelete, turn_off_sponsorblock)
-    for i in range(1):
+    for i in range(30):
         with yt_dlp.YoutubeDL(ytdl_opts) as ydl:
             try:
                 info_dict = ydl.extract_info(url, download=True)
                 break
-            except DownloadError:
-                if i == 1:
+            except DownloadError as e:
+                import codecs
+                import time
+                with codecs.open(f'eroor {ctime.time}.txt', 'w', 'utf-8') as file:
+                    file.write(str(e))
+                if i.rsplit('] ', 1)[-1] != 'Temporary failure in name resolution':
                     ytdl_opts = extract_info(url, res, audio_q, segmentsToMark, segmentsToDelete, turn_off_sponsorblock)
                     turn_off_sponsorblock = True
+            except KeyboardInterrupt:
+                exit(0)
 
     ext = info_dict.get('requested_downloads')[0].get('_filename').split('.')[-1]
 
@@ -220,8 +226,9 @@ def download_video(url, id):
         chapters2 = info_dict.get('chapters')
         if chapters2 != None:
             chapters += chapters2
+            chapters = [chapter for chapter in sorted(chapters, key=lambda item: list(item.values())[0])]
 
-        for num, chapter in enumerate(info_dict.get('requested_downloads')[0].get('sponsorblock_chapters')):
+        for num, chapter in enumerate(chapters):
             if 'category' in chapter:
                 title = chapter.get('category')
             else:
@@ -327,4 +334,4 @@ def download_video(url, id):
     # image.thumbnail(1280, 720)
     image.save(thumbnail_filename)
 
-    return filename, thumbnail_filename, ext, chapters_info, turn_off_sponsorblock
+    return filename, thumbnail_filename, ext, chapters_info, not turn_off_sponsorblock
